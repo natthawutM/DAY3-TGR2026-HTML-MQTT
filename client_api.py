@@ -17,6 +17,7 @@ from PIL import Image, ImageOps
 import paho.mqtt.client as mqtt
 import requests
 from dotenv import load_dotenv
+from preview import class_overlay
 
 ROOT = Path(__file__).resolve().parent
 CLASSES = ("black", "broken", "good", "husk", "immature", "parchment", "shell")
@@ -63,19 +64,10 @@ class Model:
         return {"image_name": name, "objects": objects}, rgb, labels
 
     def artifacts(self, folder, prediction, rgb, labels):
-        self.module.write_image(folder / "seg_mask" / (Path(prediction["image_name"]).stem + ".png"), labels)
+        filename = Path(prediction["image_name"]).stem + ".png"
+        self.module.write_image(folder / "seg_mask" / filename, labels)
         # Preview generation is deferred until both deliveries complete.
-        import cv2
-        image = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        h, w = labels.shape
-        scale = min(1., 1280 / max(h, w))
-        size = (max(1, round(w * scale)), max(1, round(h * scale)))
-        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
-        ids = cv2.resize(labels, size, interpolation=cv2.INTER_NEAREST)
-        for obj in prediction["objects"]:
-            contours, _ = cv2.findContours((ids == obj["id"]).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(image, contours, -1, (30, 220, 60), 1)
-        self.module.write_image(folder / "vis" / (Path(prediction["image_name"]).stem + ".png"), image)
+        self.module.write_image(folder / "vis" / filename, class_overlay(rgb, labels, prediction["objects"]))
 
 
 class Publisher:

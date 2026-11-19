@@ -167,7 +167,7 @@ def package(output, team):
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         prefix = f"team_{team}_day3/"
         for name in ("README.md", "requirements.txt", "client.py", "train.py", "infer.py",
-                     "data.py", "post.py", "config.example.json"):
+                     "data.py", "post.py", "preview.py", "config.example.json"):
             path = ROOT / name
             if path.exists():
                 bundle.write(path, prefix + name)

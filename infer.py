@@ -11,8 +11,9 @@ import onnxruntime as ort
 from PIL import Image, ImageOps
 from scipy.ndimage import find_objects
 
-from data import letterbox, normalize, overlay_regions
+from data import letterbox, normalize
 from post import instances_from_logits
+from preview import class_overlay
 
 IMAGE_TYPES = {'.jpg', '.jpeg', '.png'}
 
@@ -190,18 +191,9 @@ def run_one(predictor, path, output, vis_max_side=1280):
     with Image.open(path) as original:
         image = np.asarray(ImageOps.exif_transpose(original).convert('RGB'))
     labels, classes, regions = predictor.predict_instances(image)
-    labels, objects, regions = submission_instances(labels, classes, regions, path.name)
+    labels, objects, _ = submission_instances(labels, classes, regions, path.name)
     write_image(output / 'seg_mask' / f'{path.stem}.png', labels)
-    h, w = labels.shape
-    if 0 < vis_max_side < max(h, w):
-        scale = vis_max_side / max(h, w)
-        size = (max(1, round(w * scale)), max(1, round(h * scale)))
-        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
-        preview_labels = cv2.resize(labels, size, interpolation=cv2.INTER_NEAREST)
-        regions = [(i, box, preview_labels[box] == i)
-                   for i, box in enumerate(find_objects(preview_labels), 1) if box is not None]
-    visible = ((i, f"{i} {objects[i-1]['class']}", box, mask) for i, box, mask in regions)
-    write_image(output / 'vis' / f'{path.stem}.png', overlay_regions(image, visible))
+    write_image(output / 'vis' / f'{path.stem}.png', class_overlay(image, labels, objects, vis_max_side))
     return {'image_name': path.name, 'objects': objects}
 
 
