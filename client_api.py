@@ -55,8 +55,11 @@ class Model:
         self.predictor = self.module.Predictor(weights, variant, threads)
 
     def predict(self, data, name):
-        with Image.open(io.BytesIO(data)) as original:
-            rgb = np.asarray(ImageOps.exif_transpose(original).convert("RGB"))
+        if hasattr(self.module, 'decode_rgb'):
+            rgb = self.module.decode_rgb(data, self.predictor.manifest.get('image_decoder', 'pil'))
+        else:
+            with Image.open(io.BytesIO(data)) as original:
+                rgb = np.asarray(ImageOps.exif_transpose(original).convert("RGB"))
         labels, classes, regions = self.predictor.predict_instances(rgb)
         labels, objects, regions = self.module.submission_instances(labels, classes, regions, name)
         if any(obj["class"] not in CLASSES for obj in objects):
