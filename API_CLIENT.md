@@ -25,9 +25,9 @@ cp .env.example .env
 nano .env
 ```
 
-ไฟล์ .env ที่เตรียมไว้มีช่อง HTTP_URL, TEAM_HTTP_PASSWORD, TEAM_ID, TEAM_MQTT_KEY และ MODEL_PROJECT ให้กรอก พร้อมค่าตั้งต้นของ MQTT host/port/path/track/event ตรวจ TEAM_ID ให้ตรง dashboard ใช้ HTTP password สำหรับล็อกอินเว็บไซต์ และ MQTT key ที่ Generate สำหรับ broker
+กรอก HTTP_URL, TEAM_HTTP_PASSWORD, TEAM_ID และ TEAM_MQTT_KEY ใน .env ตรวจ TEAM_ID ให้ตรง dashboard ใช้ HTTP password สำหรับล็อกอินเว็บไซต์ และ MQTT key ที่ Generate สำหรับ broker
 
-MODEL_PROJECT เป็นพาธโฟลเดอร์ที่มี infer.py ส่วน MODEL_WEIGHTS เป็นพาธโฟลเดอร์น้ำหนัก ถ้าเว้น MODEL_WEIGHTS จะใช้ weights ใต้ MODEL_PROJECT ใช้ absolute path สำหรับรันข้ามโฟลเดอร์ กรณีรหัสผ่านมี # หรือช่องว่างให้ครอบค่าด้วย single quotes และใช้รูปแบบ quoting ตาม python-dotenv
+ค่าเริ่มต้นโหลด infer.py และ weights/ ที่อยู่ข้าง client_api.py เว้น MODEL_PROJECT และ MODEL_WEIGHTS ว่างได้ ใช้สองค่านี้หรืออาร์กิวเมนต์ใน CLI เมื่อต้องการชี้ไปโมเดลในโฟลเดอร์อื่น กรณีรหัสผ่านมี # หรือช่องว่างให้ครอบค่าด้วย single quotes ตามรูปแบบ python-dotenv
 
 ตรวจ config ในเครื่องก่อนขอภาพ โดยคำสั่งนี้ตรวจว่ามีค่าที่จำเป็นและพาธโมเดล โดยไม่แสดงค่ารหัสผ่าน
 

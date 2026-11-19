@@ -165,14 +165,12 @@ def main():
         variable = section.get(field)
         if variable and not os.environ.get(variable):
             parser.error(f"Set {variable} in .env")
-    project_setting = args.model_project or os.environ.get("MODEL_PROJECT")
-    if not project_setting:
-        parser.error("Set MODEL_PROJECT in .env or provide --model-project")
+    project_setting = args.model_project or os.environ.get("MODEL_PROJECT") or ROOT
     project = Path(project_setting).resolve()
     weights_setting = args.weights or os.environ.get("MODEL_WEIGHTS")
     weights = Path(weights_setting).resolve() if weights_setting else project / "weights"
     if not (project / "infer.py").is_file() or not weights.is_dir():
-        parser.error("Check MODEL_PROJECT/infer.py and MODEL_WEIGHTS directory")
+        parser.error(f"Expected {project / 'infer.py'} and weights directory {weights}")
     if args.check_config:
         print("Configuration ready. Model paths and required credentials are present. No network request made.")
         return
