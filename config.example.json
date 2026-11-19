@@ -1,0 +1,38 @@
+{
+  "team_id": "41",
+  "defect_classes": null,
+  "latency_mode": "per_image",
+  "download": {
+    "url": "",
+    "format": "zip",
+    "headers": {},
+    "token_env": "",
+    "timeout": 120
+  },
+  "inference": {
+    "command": ["{python}", "infer.py", "--input", "{input}", "--weights", "{weights}", "--out", "{out}"]
+  },
+  "submit": {
+    "url": "",
+    "mode": "multipart",
+    "zip_url": "",
+    "results_field": "results",
+    "zip_field": "file",
+    "form_fields": {},
+    "headers": {},
+    "token_env": "",
+    "timeout": 120
+  },
+  "mqtt": {
+    "host": "",
+    "port": 1883,
+    "topic": "",
+    "client_id": "",
+    "username_env": "",
+    "password_env": "",
+    "tls": false,
+    "ca_cert": "",
+    "qos": 1,
+    "timeout": 30
+  }
+}

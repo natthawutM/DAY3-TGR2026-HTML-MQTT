@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+config.json
+config.api.json
+outputs_api/
+.env
+input/
+outputs/
+mock_server/runtime/

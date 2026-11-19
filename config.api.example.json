@@ -1,0 +1,18 @@
+{
+  "http_url": "",
+  "http_token_env": "TEAM_HTTP_PASSWORD",
+  "team_id": "TEAM_41",
+  "preflight_stats": true,
+  "mqtt": {
+    "host": "tesa-score.c333m.site",
+    "port": 443,
+    "transport": "websockets",
+    "protocol": 5,
+    "ws_path": "/mqtt/",
+    "tls": true,
+    "key_env": "TEAM_MQTT_KEY",
+    "track": "EdgeAI",
+    "event": "1",
+    "timeout": 15
+  }
+}
