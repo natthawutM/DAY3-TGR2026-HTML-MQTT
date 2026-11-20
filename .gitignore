@@ -7,4 +7,3 @@ outputs_api/
 .env
 input/
 outputs/
-mock_server/runtime/

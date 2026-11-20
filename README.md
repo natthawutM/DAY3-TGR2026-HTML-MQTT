@@ -19,9 +19,16 @@ API ผู้จัดประกาศแล้ว ใช้ [client_api.py](c
 
 ## โมเดลสำหรับลองรันบน Pi
 
-weights/ มี A0 พร้อม classifier ที่ปรับด้วยข้อมูล Day 3 ในรูป ONNX FP32 ขนาด 512 ใช้ watershed boundary 0.425 และ min_marker 20 ค่าเหล่านี้อยู่ใน weights/manifest.json ติดตั้งด้วย `python -m pip install -r requirements.txt` ใน environment บน Pi
+**A0 Day 3 Refined** เป็นโมเดลที่ repo ใช้โดยค่าเริ่มต้น ไฟล์ ONNX FP32 ทั้งสามอยู่ใน `weights/` รวม 15.59 MB ใช้อินพุต 512 และ Watershed foreground 0.40 กับ boundary 0.18 ติดตั้ง dependencies ด้วย `python -m pip install -r requirements.txt` ใน environment บน Pi
 
-`weights/best.pt` คือ checkpoint PyTorch ของตัวแยกเมล็ด A0 และ `weights/classifier.pt` คือ checkpoint ของ classifier ที่ฝึกเพิ่มด้วยข้อมูล Day 3 คำสั่ง inference โหลด `model.onnx` และ `classifier.onnx` ตาม manifest
+ลองรันกับชุด Triangle 5 ภาพจากโฟลเดอร์ repo
+
+```bash
+python infer.py --input datasets/day3_triangle/valid --weights weights --out outputs/refined_triangle --threads 4
+```
+
+สำหรับ API client ให้ใช้ค่าเริ่มต้นตาม [API_CLIENT.md](API_CLIENT.md)
+
 
 คำสั่งที่ client จะเรียกต้องรองรับรูปแบบ
 
@@ -84,9 +91,7 @@ export MQTT_PASSWORD='ค่าจากผู้จัด'
 
 HTTP token_env ใช้ชื่อ environment variable พร้อม token_header และ token_prefix ถ้าผู้จัดกำหนด header ที่ต่างจาก Authorization: Bearer สามารถเพิ่มสองคีย์นี้ใน config ได้ topic รองรับ {image} หรือ {stem} เมื่อผู้จัดกำหนดให้ชื่อภาพอยู่ใน topic
 
-## ซ้อมในเครื่องก่อนโมเดลพร้อม
-
-มีเว็บอัปโหลดภาพและ MQTT broker จำลองใน mock_server/ ใช้ python mock_server/server.py เพื่อเปิดเว็บที่ http://127.0.0.1:8088 แล้วเรียก python mock_server/run_client.py กับ --model-project ของโมเดลที่พร้อมใช้งาน อ่านคำสั่งติดตั้งและรันระหว่าง Windows กับ Pi ใน [คู่มือเว็บจำลอง](mock_server/README.md)
+## ทดสอบ client ในเครื่อง
 
 ```bash
 python selftest.py

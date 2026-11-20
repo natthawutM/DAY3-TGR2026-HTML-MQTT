@@ -62,18 +62,9 @@ model-project ต้องมี infer.py ที่เปิด Predictor(weight
 | receive_to_mqtt_ack_ms | รับภาพครบจน client ได้รับ MQTT PUBACK |
 | request_to_mqtt_ack_ms | เริ่ม HTTP GET จนได้รับ PUBACK รวม network download |
 | server_http_response.duration_seconds | เวลาที่ HTTP server ผู้จัดวัดจากส่งภาพเสร็จจนรับ JSON POST |
-| mock_server_roundtrip_ms ในเว็บจำลอง | เวลาจาก mock HTTP server ส่งภาพเสร็จถึง subscriber รับ MQTT |
 
 เวลา PUBACK เป็นเวลาที่ client ยืนยันว่าฝั่ง broker รับ publish สำเร็จ ค่า HTTP server duration วัดปลายทางที่ต่างออกไป ส่วนเวลาถึง subscriber ของผู้จัดต้องอ้างระบบผู้จัด ข้อมูลที่ผู้จัดแจ้งด้วยปากเปล่าคือ HTTP → MQTT ขณะที่ API ระบุ HTTP duration และ MQTT latency_ms แยกกัน จึงเก็บตัววัดเหล่านี้เพื่อเทียบกันได้
 
 defect_ratio ใช้ (จำนวนทั้งหมด - good) / จำนวนทั้งหมด และปัด 4 ตำแหน่งตาม client_test.py ของผู้จัด ภาพว่างให้ 0.0 ชื่อ counts ใช้ตัวเล็กครบ 7 key และสร้างจาก objects หลังซ่อม mask
 
 ผลลัพธ์ POST คือ {"img_id": "...", "predictions": {"image_name": "...", "objects": [...]}} ตัวอย่าง API ฉบับนี้ระบุการส่ง JSON รายภาพ ส่วนการอัปโหลด ZIP ให้ใช้ endpoint และวิธีที่ผู้จัดประกาศเพิ่มเติม
-
-## ผลการทดสอบในเครื่อง
-
-ทดสอบจริงกับ YOLO26n-seg ONNX 640 ที่มีอยู่โดย preload หนึ่งครั้ง ต่อ MQTT ค้างแล้ว GET ภาพ 2 ครั้งจาก mock API ส่ง HTTP และ MQTT สำเร็จทั้งสองภาพ counts ตรงกัน
-
-Windows localhost รอบตัวอย่างได้ receive_to_mqtt_ack_ms ประมาณ 40.6 และ 31.7 ms ขณะที่ HTTP server duration ประมาณ 54.0 และ 42.2 ms ตัวเลขนี้เป็นผลบน Windows ในเครือข่าย loopback ต้องวัดใหม่บน Pi กับ HTTP server และ WSS broker จริง
-
-เปิด mock_server/server.py --port 8090 --mqtt-port 18885 แล้วอัปโหลดภาพที่ http://127.0.0.1:8090 ได้ mock รองรับ API รายภาพเพิ่มจากโหมด ZIP เดิม การเชื่อม localhost ที่ตรวจใช้ MQTT TCP v3.1.1 ส่วน config สำหรับผู้จัดใช้ WSS TLS และ MQTT v5 ตามเอกสาร

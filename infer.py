@@ -1,4 +1,5 @@
 import argparse
+import io
 import json
 import statistics
 import sys
@@ -11,18 +12,36 @@ import onnxruntime as ort
 from PIL import Image, ImageOps
 from scipy.ndimage import find_objects
 
-from data import letterbox, normalize
+from data import letterbox, normalize, overlay_regions
 from post import instances_from_logits
-from preview import class_overlay
 
 IMAGE_TYPES = {'.jpg', '.jpeg', '.png'}
 
 
+def decode_rgb(source, decoder='pil'):
+    """Decode a path or encoded image bytes; OpenCV honors EXIF orientation."""
+    is_path = isinstance(source, (str, Path))
+    if decoder == 'opencv':
+        buffer = np.fromfile(source, np.uint8) if is_path else np.frombuffer(source, np.uint8)
+        image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError('Cannot decode input image')
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    if decoder != 'pil':
+        raise ValueError('image_decoder must be pil or opencv')
+    with Image.open(source if is_path else io.BytesIO(source)) as original:
+        return np.asarray(ImageOps.exif_transpose(original).convert('RGB'))
+
+
 class Predictor:
-    def __init__(self, weights, variant, threads, confidence=None, watershed=None):
+    def __init__(self, weights, variant, threads, confidence=None, watershed=None, roi_margin=None):
         self.weights = Path(weights)
         self.manifest = json.loads((self.weights / 'manifest.json').read_text())
         self.variant = self.manifest['variants'][variant]
+        self.roi_margin = self.manifest.get('roi_margin') if roi_margin is None else roi_margin
+        roi_margin = self.roi_margin
+        if roi_margin is not None and (self.manifest.get('family') != 'unet' or not 0 <= roi_margin <= 1):
+            raise ValueError('ROI margin must be between 0 and 1 for a U-Net model')
         if confidence is not None:
             if self.manifest.get('family') != 'yolo' or not 0 <= confidence <= 1:
                 raise ValueError('Confidence must be between 0 and 1 for a YOLO model')
@@ -47,6 +66,11 @@ class Predictor:
                                               providers=['CPUExecutionProvider'])
         self.classifier = ort.InferenceSession(str(self.weights / self.manifest['classifier']), options,
                                                providers=['CPUExecutionProvider'])
+        self.secondary_classifier = None
+        if self.manifest.get('classifier_secondary'):
+            self.secondary_classifier = ort.InferenceSession(
+                str(self.weights / self.manifest['classifier_secondary']), options,
+                providers=['CPUExecutionProvider'])
 
     def prep_crop(self, image, mask):
         settings = self.manifest['classifier_preprocessing']
@@ -66,7 +90,47 @@ class Predictor:
         labels, classes, _ = self.predict_instances(image)
         return labels, classes
 
-    def predict_instances(self, image):
+    def unet_labels(self, image, shape=None):
+        canvas, box = letterbox(image, self.size)
+        logits = self.segmenter.run(None, {'image': normalize(canvas)[None]})[0][0]
+        return instances_from_logits(logits, box, shape or image.shape[:2], self.manifest['watershed'])
+
+    def refine_roi(self, image, labels):
+        mask = labels > 0
+        x, y, w, h = cv2.boundingRect(mask.astype(np.uint8))
+        h_img, w_img = image.shape[:2]
+        def restore():
+            return labels if labels.shape == (h_img, w_img) else cv2.resize(
+                labels, (w_img, h_img), interpolation=cv2.INTER_NEAREST)
+        if not w or not h:
+            return restore()
+        sy, sx = h_img / labels.shape[0], w_img / labels.shape[1]
+        x, y, w, h = int(np.floor(x*sx)), int(np.floor(y*sy)), int(np.ceil(w*sx)), int(np.ceil(h*sy))
+        margin = max(4, int(round(max(w, h) * self.roi_margin)))
+        x1, y1 = max(0, x - margin), max(0, y - margin)
+        x2, y2 = min(w_img, x + w + margin), min(h_img, y + h + margin)
+        # Skip when cropping would barely improve the effective resolution.
+        if max(x2 - x1, y2 - y1) > .85 * max(h_img, w_img):
+            return restore()
+        roi = np.s_[y1:y2, x1:x2]
+        refined = self.unet_labels(image[roi])
+        # Compare at locator resolution rather than allocating a full-resolution
+        # first-pass mask just to find the crop. This option is opt-in in manifest.
+        lx1, ly1 = int(x1 / sx), int(y1 / sy)
+        lx2, ly2 = int(np.ceil(x2 / sx)), int(np.ceil(y2 / sy))
+        baseline = mask[ly1:ly2, lx1:lx2]
+        check = cv2.resize((refined > 0).astype(np.uint8), (baseline.shape[1], baseline.shape[0]),
+                           interpolation=cv2.INTER_NEAREST).astype(bool)
+        # Keep the full-image prediction if the zoom loses much of its foreground.
+        if np.count_nonzero(baseline & check) < .8 * np.count_nonzero(baseline):
+            return restore()
+        result = np.zeros((h_img, w_img), dtype=np.uint16)
+        result[roi] = refined
+        return result
+
+    def predict_instances(self, image, *, ensemble_confidences=None):
+        if ensemble_confidences is not None and self.manifest.get("classifier_secondary") is None:
+            raise ValueError("Confidence collection requires the ensemble classifier")
         if self.manifest.get('family') == 'yolo':
             result = self.yolo.predict(cv2.cvtColor(image, cv2.COLOR_RGB2BGR), imgsz=self.size,
                                        retina_masks=True, device='cpu', verbose=False,
@@ -81,14 +145,47 @@ class Predictor:
                         labels[visible] = len(classes)
             regions = [(i, box, labels[box] == i) for i, box in enumerate(find_objects(labels), 1) if box is not None]
             return labels, classes, regions
-        canvas, box = letterbox(image, self.size)
-        logits = self.segmenter.run(None, {'image': normalize(canvas)[None]})[0][0]
-        labels = instances_from_logits(logits, box, image.shape[:2], self.manifest['watershed'])
+        locator = self.manifest.get('roi_locator_side', 0) if self.roi_margin is not None else 0
+        shape = None
+        if locator and max(image.shape[:2]) > locator:
+            scale = locator / max(image.shape[:2])
+            shape = (max(1, round(image.shape[0]*scale)), max(1, round(image.shape[1]*scale)))
+        labels = self.unet_labels(image, shape)
+        if self.roi_margin is not None:
+            labels = self.refine_roi(image, labels)
         classes = []
         regions = [(i, box, labels[box] == i) for i, box in enumerate(find_objects(labels), 1) if box is not None]
         for start in range(0, len(regions), 16):
             crops = [self.prep_crop(image[box], mask) for _, box, mask in regions[start:start+16]]
-            scores = self.classifier.run(None, {'image': np.stack(crops)})[0]
+            batch = np.stack(crops)
+            rotations = self.manifest.get('classifier_rotations', [0])
+            scores = self.classifier.run(None, {'image': np.ascontiguousarray(
+                np.rot90(batch, rotations[0], axes=(-2, -1)))})[0]
+            if len(rotations) > 1:
+                margin = self.manifest.get('classifier_tta_margin')
+                selected = np.arange(len(batch))
+                if margin is not None:
+                    probabilities = np.exp(scores-scores.max(axis=1, keepdims=True))
+                    probabilities /= probabilities.sum(axis=1, keepdims=True)
+                    ordered = np.sort(probabilities, axis=1)
+                    selected = np.flatnonzero(ordered[:, -1]-ordered[:, -2] < margin)
+                if len(selected):
+                    combined = scores[selected].copy()
+                    for k in rotations[1:]:
+                        combined += self.classifier.run(None, {'image': np.ascontiguousarray(
+                            np.rot90(batch[selected], k, axes=(-2, -1)))})[0]
+                    scores[selected] = combined/len(rotations)
+            if self.secondary_classifier is not None:
+                secondary_rotations = self.manifest.get('classifier_secondary_rotations', [0])
+                secondary_scores = sum(self.secondary_classifier.run(None, {'image': np.ascontiguousarray(
+                    np.rot90(batch, k, axes=(-2, -1)))})[0] for k in secondary_rotations) / len(secondary_rotations)
+                def probabilities(values):
+                    values = np.exp(values-values.max(axis=1, keepdims=True))
+                    return values/values.sum(axis=1, keepdims=True)
+                weight = self.manifest.get('classifier_secondary_weight', .4)
+                scores = (1-weight)*probabilities(scores)+weight*probabilities(secondary_scores)
+            if ensemble_confidences is not None:
+                ensemble_confidences.extend(scores.max(axis=1).tolist())
             classes.extend(self.classes[i] for i in scores.argmax(1))
         return labels, classes, regions
 
@@ -188,12 +285,20 @@ def write_image(path, pixels):
 
 
 def run_one(predictor, path, output, vis_max_side=1280):
-    with Image.open(path) as original:
-        image = np.asarray(ImageOps.exif_transpose(original).convert('RGB'))
+    image = decode_rgb(path, predictor.manifest.get('image_decoder', 'pil'))
     labels, classes, regions = predictor.predict_instances(image)
-    labels, objects, _ = submission_instances(labels, classes, regions, path.name)
+    labels, objects, regions = submission_instances(labels, classes, regions, path.name)
     write_image(output / 'seg_mask' / f'{path.stem}.png', labels)
-    write_image(output / 'vis' / f'{path.stem}.png', class_overlay(image, labels, objects, vis_max_side))
+    h, w = labels.shape
+    if 0 < vis_max_side < max(h, w):
+        scale = vis_max_side / max(h, w)
+        size = (max(1, round(w * scale)), max(1, round(h * scale)))
+        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+        preview_labels = cv2.resize(labels, size, interpolation=cv2.INTER_NEAREST)
+        regions = [(i, box, preview_labels[box] == i)
+                   for i, box in enumerate(find_objects(preview_labels), 1) if box is not None]
+    visible = ((i, f"{i} {objects[i-1]['class']}", box, mask) for i, box, mask in regions)
+    write_image(output / 'vis' / f'{path.stem}.png', overlay_regions(image, visible))
     return {'image_name': path.name, 'objects': objects}
 
 
@@ -203,7 +308,10 @@ def main(args):
         raise SystemExit('Use an output directory separate from the input directory')
     if args.threads < 1 or args.warmup < 0:
         raise SystemExit('Threads must be positive and warmup must be nonnegative')
-    vis_max_side = getattr(args, 'vis_max_side', 1280)
+    vis_max_side = getattr(args, 'vis_max_side', None)
+    if vis_max_side is None:
+        manifest = json.loads((args.weights / 'manifest.json').read_text(encoding='utf-8'))
+        vis_max_side = manifest.get('vis_max_side', 1280)
     if vis_max_side < 0:
         raise SystemExit('Preview side must be nonnegative')
     files = sorted(p for p in args.input.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_TYPES)
@@ -214,7 +322,8 @@ def main(args):
     for folder in ('seg_mask', 'vis'):
         (args.out / folder).mkdir(parents=True, exist_ok=True)
     watershed = json.loads(args.watershed.read_text(encoding='utf-8')) if args.watershed else None
-    predictor = Predictor(args.weights, args.variant, args.threads, args.confidence, watershed)
+    predictor = Predictor(args.weights, args.variant, args.threads, args.confidence, watershed,
+                          args.roi_margin)
     for i in range(args.warmup):
         run_one(predictor, files[i % len(files)], args.out, vis_max_side)
     rows, seconds = [], []
@@ -234,11 +343,16 @@ def main(args):
     model_paths = [args.weights / predictor.variant['file']]
     if 'classifier' in predictor.manifest:
         model_paths.append(args.weights / predictor.manifest['classifier'])
+    if 'classifier_secondary' in predictor.manifest:
+        model_paths.append(args.weights / predictor.manifest['classifier_secondary'])
     model_paths = [f for p in model_paths for f in (p.rglob('*') if p.is_dir() else [p]) if f.is_file()]
     stats = {'images': len(files), 'variant': args.variant, 'threads': args.threads, 'warmup': args.warmup,
              'median_seconds': statistics.median(seconds) + json_write_per_image,
              'vis_max_side': vis_max_side,
              'model_bytes': {p.name: p.stat().st_size for p in model_paths}}
+    stats['p95_seconds'] = float(np.percentile(seconds, 95)) + json_write_per_image
+    stats['max_seconds'] = max(seconds) + json_write_per_image
+    stats['images_over_one_second'] = sum(t + json_write_per_image > 1 for t in seconds)
     (args.out / 'benchmark.json').write_text(json.dumps(stats, indent=2))
     print(json.dumps(stats), flush=True)
 
@@ -252,6 +366,7 @@ if __name__ == '__main__':
     parser.add_argument('--threads', type=int, default=4)
     parser.add_argument('--confidence', type=float, help='Override the YOLO confidence threshold')
     parser.add_argument('--watershed', type=Path, help='JSON file overriding U-Net watershed parameters')
+    parser.add_argument('--roi-margin', type=float, help='Optional U-Net crop margin as a fraction of the detected long side')
     parser.add_argument('--warmup', type=int, default=0)
-    parser.add_argument('--vis-max-side', type=int, default=1280, help='Limit overlay size only (0 for full resolution)')
+    parser.add_argument('--vis-max-side', type=int, help='Limit overlay size only (default from manifest, otherwise 1280; 0 for full resolution)')
     main(parser.parse_args())

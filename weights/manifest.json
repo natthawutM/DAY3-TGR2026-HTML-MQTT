@@ -16,15 +16,31 @@
     "masked": true
   },
   "watershed": {
-    "foreground": 0.5,
-    "boundary": 0.425,
-    "min_area": 12,
-    "min_marker": 20
+    "foreground": 0.4,
+    "boundary": 0.18,
+    "min_area": 8,
+    "min_marker": 14,
+    "border_strip_span": 0.3,
+    "border_strip_depth": 0.1,
+    "final_min_area": 120
   },
   "variants": {
     "selected": {
       "file": "model.onnx",
       "size": 512
     }
-  }
+  },
+  "classifier_rotations": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "image_decoder": "opencv",
+  "vis_max_side": 640,
+  "classifier_secondary": "classifier_secondary.onnx",
+  "classifier_secondary_weight": 0.475,
+  "classifier_secondary_rotations": [
+    0
+  ]
 }
