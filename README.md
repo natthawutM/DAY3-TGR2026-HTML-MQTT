@@ -21,6 +21,14 @@ API ผู้จัดประกาศแล้ว ใช้ [client_api.py](c
 
 **A0 Day 3 Refined** เป็นโมเดลที่ repo ใช้โดยค่าเริ่มต้น ไฟล์ ONNX FP32 ทั้งสามอยู่ใน `weights/` รวม 15.59 MB ใช้อินพุต 512 และ Watershed foreground 0.40 กับ boundary 0.18 ติดตั้ง dependencies ด้วย `python -m pip install -r requirements.txt` ใน environment บน Pi
 
+`weights/best.pt` เป็น checkpoint PyTorch ของ segmenter ที่กู้จาก ONNX รุ่น Refined สำหรับส่งงานและใช้เป็นจุดเริ่มต้นฝึกต่อ ไฟล์เก็บ state ของโมเดลและค่าตั้ง ไม่มี state ของ optimizer ตรวจแล้วว่าเมื่อใช้ checkpoint นี้แทน ONNX ของ segmenter จะได้ mask และ predictions ตรงกันบน Triangle 5 ภาพและ Legacy valid 33 ภาพ โดยใช้ classifier ONNX เดิมทั้งสองตัว
+
+ฝึก segmenter ต่อบนเครื่องที่มี PyTorch, torchvision และ pycocotools โดยชี้ `--data-root` ไปยัง dataset ที่มี `train/_annotations.coco.json` และชี้ `--out` ไปยังโฟลเดอร์ของรอบฝึกใหม่
+
+```bash
+python train.py --data-root path/to/coco_dataset --out training/refined_finetune
+```
+
 ลองรันกับชุด Triangle 5 ภาพจากโฟลเดอร์ repo
 
 ```bash
